@@ -141,6 +141,8 @@
             </select>
           </div>
           <button class="primary" id="refreshBtn">Refresh rooster</button>
+          <button id="saveBtn">Opslaan</button>
+          <button id="resetBtn">Reset</button>
           <button id="exportBtn">Export Excel</button>
         </div>
       </div>
@@ -389,6 +391,8 @@
         });
       }).flat();
     }
+
+    const STORAGE_KEY = "ok-rooster-planner-state-v1";
 
     const state = {
       activeTab: "weektemplate",
@@ -678,6 +682,48 @@
       render();
     }
 
+    function saveState() {
+      const payload = {
+        activeTab: state.activeTab,
+        selectedBlock: state.selectedBlock,
+        selectedWeek: state.selectedWeek,
+        employees: state.employees,
+        competencies: state.competencies,
+        rotation: state.rotation,
+      };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+      alert("Wijzigingen opgeslagen.");
+    }
+
+    function loadState() {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return false;
+      try {
+        const parsed = JSON.parse(raw);
+        state.activeTab = parsed.activeTab || "weektemplate";
+        state.selectedBlock = parsed.selectedBlock || "1";
+        state.selectedWeek = parsed.selectedWeek || "1";
+        state.employees = Array.isArray(parsed.employees) ? parsed.employees : JSON.parse(JSON.stringify(defaultEmployees));
+        state.competencies = parsed.competencies && typeof parsed.competencies === "object" ? parsed.competencies : JSON.parse(JSON.stringify(defaultCompetencies));
+        state.rotation = Array.isArray(parsed.rotation) && parsed.rotation.length > 0 ? parsed.rotation : [];
+        return true;
+      } catch (error) {
+        console.error("Kon opgeslagen gegevens niet laden", error);
+        return false;
+      }
+    }
+
+    function resetState() {
+      localStorage.removeItem(STORAGE_KEY);
+      state.activeTab = "weektemplate";
+      state.selectedBlock = "1";
+      state.selectedWeek = "1";
+      state.employees = JSON.parse(JSON.stringify(defaultEmployees));
+      state.competencies = JSON.parse(JSON.stringify(defaultCompetencies));
+      buildRotationCycle();
+      render();
+    }
+
     function escapeXml(value) {
       return String(value ?? "")
         .replace(/&/g, "&amp;")
@@ -814,6 +860,8 @@
       };
 
       document.getElementById("refreshBtn").onclick = refreshPlanning;
+      document.getElementById("saveBtn").onclick = saveState;
+      document.getElementById("resetBtn").onclick = resetState;
       document.getElementById("exportBtn").onclick = exportExcel;
     }
 
@@ -1105,7 +1153,11 @@
       renderContent();
     }
 
-    buildRotationCycle();
+    if (!loadState()) {
+      buildRotationCycle();
+    } else if (!Array.isArray(state.rotation) || state.rotation.length === 0) {
+      buildRotationCycle();
+    }
     render();
   </script>
 </body>
