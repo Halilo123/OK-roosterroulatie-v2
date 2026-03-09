@@ -128,7 +128,7 @@
       <div class="row-between">
         <div>
           <h1>OK Rooster Planner</h1>
-          <p class="muted">Roulatie met 6 weken cyclus, vaste vrije dagen, competentiematrix, OK-FLEX 1/2, invaller suggesties en export naar Excel.</p>
+          <p class="muted">Roulatie op basis van de competentiematrix, met voorkeur voor alle medewerkers die Groen zijn op een dienst, zodat kennis per dienst behouden blijft. Inclusief vaste vrije dagen, OK-FLEX 1/2, invaller suggesties en export naar Excel.</p>
         </div>
         <div class="row" style="min-width: 320px;">
           <div style="min-width: 120px;">
@@ -169,7 +169,7 @@
     const days = ["Ma", "Di", "Wo", "Do", "Vr"];
     const services = ["HCK", "ADE", "OK1", "OK2", "OK4"];
     const allSkills = ["Groen", "Oranje", "Geel", "Rood"];
-    const cycleLength = 3;
+    const cycleLength = 3; // 3 blokken = 6 weken
 
     const serviceTimes = {
       HCK: "07:00",
@@ -213,33 +213,21 @@
       const yyyy = date.getFullYear();
       const mm = String(date.getMonth() + 1).padStart(2, "0");
       const dd = String(date.getDate()).padStart(2, "0");
-      return yyyy + "-" + mm + "-" + dd;
+      return `${yyyy}-${mm}-${dd}`;
     }
 
     function formatDate(dateStr) {
-      if (!dateStr) return "";
-      if (/^\d{2}\/\d{2}\/\d{4}$/.test(dateStr)) return dateStr;
-      const date = new Date(dateStr + "T00:00:00");
+      const date = new Date(`${dateStr}T00:00:00`);
       if (Number.isNaN(date.getTime())) return dateStr;
-      const dd = String(date.getDate()).padStart(2, "0");
-      const mm = String(date.getMonth() + 1).padStart(2, "0");
-      const yyyy = date.getFullYear();
-      return dd + "/" + mm + "/" + yyyy;
-    }
-
-    function normalizeDateInput(value) {
-      if (!value) return "";
-      if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
-      if (/^\d{2}\/\d{2}\/\d{4}$/.test(value)) {
-        const parts = value.split("/");
-        return parts[2] + "-" + parts[1] + "-" + parts[0];
-      }
-      return value;
+      return new Intl.DateTimeFormat("nl-NL", {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+      }).format(date);
     }
 
     function getDayDates(startDate) {
-      const normalized = normalizeDateInput(startDate);
-      const start = new Date(normalized + "T00:00:00");
+      const start = new Date(`${startDate}T00:00:00`);
       return days.reduce((acc, day, index) => {
         acc[day] = toIsoDate(addDays(start, index));
         return acc;
@@ -376,20 +364,16 @@
     }
 
     function createEmptyRotation() {
-      const yearStart = new Date("2026-01-05T00:00:00");
-      const yearEnd = new Date("2026-12-31T00:00:00");
-      const rows = [];
-      let blockNumber = 1;
-      let blockStart = new Date(yearStart);
+      return Array.from({ length: 6 }, (_, blockIndex) => {
+        const blockNumber = blockIndex + 1;
+        const blockStart = addDays(new Date("2026-01-05T00:00:00"), blockIndex * 14);
 
-      while (blockStart <= yearEnd) {
-        for (let weekInBlock = 1; weekInBlock <= 2; weekInBlock++) {
+        return [1, 2].map((weekInBlock) => {
           const weekStart = addDays(blockStart, (weekInBlock - 1) * 7);
           const weekEnd = addDays(weekStart, 4);
-          if (weekStart > yearEnd) break;
 
-          rows.push({
-            id: blockNumber + "-" + weekInBlock,
+          return {
+            id: `${blockNumber}-${weekInBlock}`,
             block: blockNumber,
             weekInBlock,
             startDate: toIsoDate(weekStart),
@@ -401,14 +385,9 @@
             OK4: "",
             flex1: "",
             flex2: "",
-          });
-        }
-
-        blockNumber += 1;
-        blockStart = addDays(blockStart, 14);
-      }
-
-      return rows;
+          };
+        });
+      }).flat();
     }
 
     const state = {
@@ -424,20 +403,34 @@
       const pools = {};
 
       services.forEach((service) => {
-        pools[service] = state.employees
+        const ranked = state.employees
           .filter((employee) => isEligibleByRole(employee, service))
-          .map((employee) => rankCandidateForService(employee, service, state.competencies, {}))
-          .filter((candidate) => candidate.skill > 0)
+          .map((employee) => ({
+            employee,
+            rank: rankCandidateForService(employee, service, state.competencies, {}),
+          }))
+          .filter((item) => item.rank.skill > 0)
           .sort((a, b) => {
-            if (b.skill !== a.skill) return b.skill - a.skill;
-            if (a.offConflicts !== b.offConflicts) return a.offConflicts - b.offConflicts;
-            if (b.roleBonus !== a.roleBonus) return b.roleBonus - a.roleBonus;
-            if (b.prefBonus !== a.prefBonus) return b.prefBonus - a.prefBonus;
-            if (b.totalScore !== a.totalScore) return b.totalScore - a.totalScore;
-            return a.name.localeCompare(b.name);
-          })
-          .slice(0, Math.max(cycleLength, 3))
-          .map((candidate) => candidate.name);
+            const aIsGreen = (state.competencies[a.employee.name] || {})[service] === "Groen" ? 1 : 0;
+            const bIsGreen = (state.competencies[b.employee.name] || {})[service] === "Groen" ? 1 : 0;
+            if (bIsGreen !== aIsGreen) return bIsGreen - aIsGreen;
+            if (b.rank.skill !== a.rank.skill) return b.rank.skill - a.rank.skill;
+            if (a.rank.offConflicts !== b.rank.offConflicts) return a.rank.offConflicts - b.rank.offConflicts;
+            if (b.rank.roleBonus !== a.rank.roleBonus) return b.rank.roleBonus - a.rank.roleBonus;
+            if (b.rank.prefBonus !== a.rank.prefBonus) return b.rank.prefBonus - a.rank.prefBonus;
+            if (b.rank.totalScore !== a.rank.totalScore) return b.rank.totalScore - a.rank.totalScore;
+            return a.employee.name.localeCompare(b.employee.name);
+          });
+
+        const greenPool = ranked
+          .filter((item) => (state.competencies[item.employee.name] || {})[service] === "Groen")
+          .map((item) => item.employee.name);
+
+        const fallbackPool = ranked
+          .filter((item) => (state.competencies[item.employee.name] || {})[service] !== "Groen")
+          .map((item) => item.employee.name);
+
+        pools[service] = greenPool.length > 0 ? greenPool.concat(fallbackPool) : fallbackPool;
       });
 
       return pools;
@@ -465,14 +458,18 @@
     function buildRotationCycle() {
       const currentCounts = {};
       const flexCounts = {};
+      const serviceRotationIndex = {};
       const rotation = createEmptyRotation();
       const servicePools = buildServicePools();
       const flexPool = buildFlexPool();
 
+      services.forEach((service) => {
+        serviceRotationIndex[service] = 0;
+      });
+
       const maxBlock = Math.max(...rotation.map((r) => r.block));
 
       for (let block = 1; block <= maxBlock; block++) {
-        const cycleIndex = (block - 1) % cycleLength;
         const weekRows = rotation.filter((r) => r.block === block);
 
         const baseRow = {
@@ -492,13 +489,16 @@
           const pool = servicePools[service] || [];
           let picked = "";
 
-          for (let i = 0; i < pool.length; i++) {
-            const candidate = pool[(cycleIndex + i) % pool.length];
-            if (!usedNames.has(candidate)) {
-              const employee = state.employees.find((e) => e.name === candidate);
-              if (employee && isEligibleByRole(employee, service)) {
-                picked = candidate;
-                break;
+          if (pool.length > 0) {
+            for (let i = 0; i < pool.length; i++) {
+              const candidate = pool[(serviceRotationIndex[service] + i) % pool.length];
+              if (!usedNames.has(candidate)) {
+                const employee = state.employees.find((e) => e.name === candidate);
+                if (employee && isEligibleByRole(employee, service)) {
+                  picked = candidate;
+                  serviceRotationIndex[service] = (serviceRotationIndex[service] + i + 1) % pool.length;
+                  break;
+                }
               }
             }
           }
@@ -517,7 +517,9 @@
         const rotatedFlex = [];
         for (let i = 0; i < flexPool.length; i++) {
           const candidate = flexPool[(block - 1 + i) % flexPool.length];
-          if (!usedNames.has(candidate)) rotatedFlex.push(candidate);
+          if (!usedNames.has(candidate)) {
+            rotatedFlex.push(candidate);
+          }
         }
 
         rotatedFlex.sort((a, b) => {
@@ -531,12 +533,12 @@
         baseRow.flex2 = rotatedFlex.find((name) => name !== baseRow.flex1) || "";
 
         if (!baseRow.flex1 || !baseRow.flex2) {
-          const fallback = computeFlexCandidates(baseRow, state.employees, state.competencies, currentCounts)
+          const flexFallback = computeFlexCandidates(baseRow, state.employees, state.competencies, currentCounts)
             .filter((candidate) => !usedNames.has(candidate.name))
             .map((candidate) => candidate.name);
 
-          if (!baseRow.flex1) baseRow.flex1 = fallback[0] || "";
-          if (!baseRow.flex2) baseRow.flex2 = fallback.find((name) => name !== baseRow.flex1) || "";
+          if (!baseRow.flex1) baseRow.flex1 = flexFallback[0] || "";
+          if (!baseRow.flex2) baseRow.flex2 = flexFallback.find((name) => name !== baseRow.flex1) || "";
         }
 
         if (baseRow.flex1) {
@@ -655,7 +657,7 @@
               .slice(0, 3)
               .map((candidate) => candidate.name);
 
-            return service + ": " + current + " → " + (replacementList.join(" / ") || "geen match");
+            return `${service}: ${current} → ${replacementList.join(" / ") || "geen match"}`;
           })
           .filter(Boolean)
           .join("\n");
@@ -681,7 +683,7 @@
         .replace(/&/g, "&amp;")
         .replace(/</g, "&lt;")
         .replace(/>/g, "&gt;")
-        .replace(/\"/g, "&quot;")
+        .replace(/"/g, "&quot;")
         .replace(/'/g, "&apos;");
     }
 
@@ -706,14 +708,14 @@
 
       const roulatieRows = [
         ["Blok", "Week van blok", "Van", "Tot", "HCK", "ADE", "OK1", "OK2", "OK4", "OK-FLEX 1", "OK-FLEX 2"],
-        ...state.rotation.map((row) => [row.block, row.weekInBlock, formatDate(row.startDate), formatDate(row.endDate), row.HCK, row.ADE, row.OK1, row.OK2, row.OK4, row.flex1, row.flex2])
+        ...state.rotation.map((row) => [row.block, row.weekInBlock, row.startDate, row.endDate, row.HCK, row.ADE, row.OK1, row.OK2, row.OK4, row.flex1, row.flex2])
       ];
 
       const weektemplateRows = [
         ["Blok", currentRow.block, "Week", currentRow.weekInBlock],
         [],
         ["Dag", "Datum", "HCK", "ADE", "OK1", "OK2", "OK4", "OK-FLEX 1", "OK-FLEX 2", "Invaller suggestie"],
-        ...weekRows.map((row) => [row.day, formatDate(row.date), row.HCK, row.ADE, row.OK1, row.OK2, row.OK4, row.flex, row.flex2, row.replacements])
+        ...weekRows.map((row) => [row.day, row.date, row.HCK, row.ADE, row.OK1, row.OK2, row.OK4, row.flex, row.flex2, row.replacements])
       ];
 
       const medewerkersRows = [
@@ -797,9 +799,9 @@
       document.getElementById("selectedWeek").value = state.selectedWeek;
 
       const current = getCurrentBlockRow();
-      document.getElementById("cardBlock").textContent = "Blok " + current.block;
-      document.getElementById("cardWeek").textContent = "Week " + state.selectedWeek;
-      document.getElementById("cardPeriod").textContent = formatDate(current.startDate) + " t/m " + formatDate(current.endDate);
+      document.getElementById("cardBlock").textContent = `Blok ${current.block}`;
+      document.getElementById("cardWeek").textContent = `Week ${state.selectedWeek}`;
+      document.getElementById("cardPeriod").textContent = `${formatDate(current.startDate)} t/m ${formatDate(current.endDate)}`;
 
       blockSelect.onchange = (e) => {
         state.selectedBlock = e.target.value;
@@ -883,8 +885,8 @@
                   <tr>
                     <td>${row.block}</td>
                     <td><input class="input" data-rotation="${index}" data-field="weekInBlock" value="${row.weekInBlock}" /></td>
-                    <td><input class="input" data-rotation="${index}" data-field="startDate" value="${formatDate(row.startDate)}" /></td>
-                    <td><input class="input" data-rotation="${index}" data-field="endDate" value="${formatDate(row.endDate)}" /></td>
+                    <td><input class="input" data-rotation="${index}" data-field="startDate" value="${row.startDate}" /></td>
+                    <td><input class="input" data-rotation="${index}" data-field="endDate" value="${row.endDate}" /></td>
                     ${services.map((service) => `
                       <td><input class="input" data-rotation="${index}" data-field="${service}" value="${row[service] || ""}" /></td>
                     `).join("")}
@@ -1019,10 +1021,7 @@
         input.addEventListener("input", (e) => {
           const index = Number(e.target.dataset.rotation);
           const field = e.target.dataset.field;
-          state.rotation[index][field] =
-            field === "startDate" || field === "endDate"
-              ? normalizeDateInput(e.target.value)
-              : e.target.value;
+          state.rotation[index][field] = e.target.value;
         });
       });
 
@@ -1067,7 +1066,7 @@
       const addBtn = document.getElementById("addEmployeeBtn");
       if (addBtn) {
         addBtn.onclick = () => {
-          const newName = "Nieuw" + (state.employees.length + 1);
+          const newName = `Nieuw${state.employees.length + 1}`;
           state.employees.push({
             name: newName,
             hours: 36,
@@ -1098,30 +1097,6 @@
       if (state.activeTab === "dashboard") content.innerHTML = renderDashboard();
 
       bindTabEvents();
-    }
-
-    function renderTabs() {
-      const tabs = [
-        ["weektemplate", "Weektemplate"],
-        ["roulatie", "Roulatie"],
-        ["medewerkers", "Medewerkers"],
-        ["competenties", "Competenties"],
-        ["dashboard", "Dashboard"],
-      ];
-
-      document.getElementById("tabs").innerHTML = tabs
-        .map(([key, label]) => {
-          const active = state.activeTab === key ? "tab active" : "tab";
-          return `<button class="${active}" data-tab="${key}">${label}</button>`;
-        })
-        .join("");
-
-      document.querySelectorAll("[data-tab]").forEach((btn) => {
-        btn.addEventListener("click", () => {
-          state.activeTab = btn.dataset.tab;
-          render();
-        });
-      });
     }
 
     function render() {
