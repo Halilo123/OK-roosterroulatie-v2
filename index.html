@@ -169,7 +169,7 @@
     const days = ["Ma", "Di", "Wo", "Do", "Vr"];
     const services = ["HCK", "ADE", "OK1", "OK2", "OK4"];
     const allSkills = ["Groen", "Oranje", "Geel", "Rood"];
-    const cycleLength = 3; // 3 blokken = 6 weken
+    const cycleLength = 3;
 
     const serviceTimes = {
       HCK: "07:00",
@@ -213,21 +213,33 @@
       const yyyy = date.getFullYear();
       const mm = String(date.getMonth() + 1).padStart(2, "0");
       const dd = String(date.getDate()).padStart(2, "0");
-      return `${yyyy}-${mm}-${dd}`;
+      return yyyy + "-" + mm + "-" + dd;
     }
 
     function formatDate(dateStr) {
-      const date = new Date(`${dateStr}T00:00:00`);
+      if (!dateStr) return "";
+      if (/^\d{2}\/\d{2}\/\d{4}$/.test(dateStr)) return dateStr;
+      const date = new Date(dateStr + "T00:00:00");
       if (Number.isNaN(date.getTime())) return dateStr;
-      return new Intl.DateTimeFormat("nl-NL", {
-        day: "2-digit",
-        month: "2-digit",
-        year: "numeric",
-      }).format(date);
+      const dd = String(date.getDate()).padStart(2, "0");
+      const mm = String(date.getMonth() + 1).padStart(2, "0");
+      const yyyy = date.getFullYear();
+      return dd + "/" + mm + "/" + yyyy;
+    }
+
+    function normalizeDateInput(value) {
+      if (!value) return "";
+      if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+      if (/^\d{2}\/\d{2}\/\d{4}$/.test(value)) {
+        const parts = value.split("/");
+        return parts[2] + "-" + parts[1] + "-" + parts[0];
+      }
+      return value;
     }
 
     function getDayDates(startDate) {
-      const start = new Date(`${startDate}T00:00:00`);
+      const normalized = normalizeDateInput(startDate);
+      const start = new Date(normalized + "T00:00:00");
       return days.reduce((acc, day, index) => {
         acc[day] = toIsoDate(addDays(start, index));
         return acc;
@@ -364,16 +376,20 @@
     }
 
     function createEmptyRotation() {
-      return Array.from({ length: 6 }, (_, blockIndex) => {
-        const blockNumber = blockIndex + 1;
-        const blockStart = addDays(new Date("2026-01-05T00:00:00"), blockIndex * 14);
+      const yearStart = new Date("2026-01-05T00:00:00");
+      const yearEnd = new Date("2026-12-31T00:00:00");
+      const rows = [];
+      let blockNumber = 1;
+      let blockStart = new Date(yearStart);
 
-        return [1, 2].map((weekInBlock) => {
+      while (blockStart <= yearEnd) {
+        for (let weekInBlock = 1; weekInBlock <= 2; weekInBlock++) {
           const weekStart = addDays(blockStart, (weekInBlock - 1) * 7);
           const weekEnd = addDays(weekStart, 4);
+          if (weekStart > yearEnd) break;
 
-          return {
-            id: `${blockNumber}-${weekInBlock}`,
+          rows.push({
+            id: blockNumber + "-" + weekInBlock,
             block: blockNumber,
             weekInBlock,
             startDate: toIsoDate(weekStart),
@@ -385,9 +401,14 @@
             OK4: "",
             flex1: "",
             flex2: "",
-          };
-        });
-      }).flat();
+          });
+        }
+
+        blockNumber += 1;
+        blockStart = addDays(blockStart, 14);
+      }
+
+      return rows;
     }
 
     const state = {
@@ -448,7 +469,9 @@
       const servicePools = buildServicePools();
       const flexPool = buildFlexPool();
 
-      for (let block = 1; block <= 6; block++) {
+      const maxBlock = Math.max(...rotation.map((r) => r.block));
+
+      for (let block = 1; block <= maxBlock; block++) {
         const cycleIndex = (block - 1) % cycleLength;
         const weekRows = rotation.filter((r) => r.block === block);
 
@@ -494,9 +517,7 @@
         const rotatedFlex = [];
         for (let i = 0; i < flexPool.length; i++) {
           const candidate = flexPool[(block - 1 + i) % flexPool.length];
-          if (!usedNames.has(candidate)) {
-            rotatedFlex.push(candidate);
-          }
+          if (!usedNames.has(candidate)) rotatedFlex.push(candidate);
         }
 
         rotatedFlex.sort((a, b) => {
@@ -510,12 +531,12 @@
         baseRow.flex2 = rotatedFlex.find((name) => name !== baseRow.flex1) || "";
 
         if (!baseRow.flex1 || !baseRow.flex2) {
-          const flexFallback = computeFlexCandidates(baseRow, state.employees, state.competencies, currentCounts)
+          const fallback = computeFlexCandidates(baseRow, state.employees, state.competencies, currentCounts)
             .filter((candidate) => !usedNames.has(candidate.name))
             .map((candidate) => candidate.name);
 
-          if (!baseRow.flex1) baseRow.flex1 = flexFallback[0] || "";
-          if (!baseRow.flex2) baseRow.flex2 = flexFallback.find((name) => name !== baseRow.flex1) || "";
+          if (!baseRow.flex1) baseRow.flex1 = fallback[0] || "";
+          if (!baseRow.flex2) baseRow.flex2 = fallback.find((name) => name !== baseRow.flex1) || "";
         }
 
         if (baseRow.flex1) {
@@ -634,7 +655,7 @@
               .slice(0, 3)
               .map((candidate) => candidate.name);
 
-            return `${service}: ${current} → ${replacementList.join(" / ") || "geen match"}`;
+            return service + ": " + current + " → " + (replacementList.join(" / ") || "geen match");
           })
           .filter(Boolean)
           .join("\n");
@@ -660,7 +681,7 @@
         .replace(/&/g, "&amp;")
         .replace(/</g, "&lt;")
         .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
+        .replace(/\"/g, "&quot;")
         .replace(/'/g, "&apos;");
     }
 
@@ -685,14 +706,14 @@
 
       const roulatieRows = [
         ["Blok", "Week van blok", "Van", "Tot", "HCK", "ADE", "OK1", "OK2", "OK4", "OK-FLEX 1", "OK-FLEX 2"],
-        ...state.rotation.map((row) => [row.block, row.weekInBlock, row.startDate, row.endDate, row.HCK, row.ADE, row.OK1, row.OK2, row.OK4, row.flex1, row.flex2])
+        ...state.rotation.map((row) => [row.block, row.weekInBlock, formatDate(row.startDate), formatDate(row.endDate), row.HCK, row.ADE, row.OK1, row.OK2, row.OK4, row.flex1, row.flex2])
       ];
 
       const weektemplateRows = [
         ["Blok", currentRow.block, "Week", currentRow.weekInBlock],
         [],
         ["Dag", "Datum", "HCK", "ADE", "OK1", "OK2", "OK4", "OK-FLEX 1", "OK-FLEX 2", "Invaller suggestie"],
-        ...weekRows.map((row) => [row.day, row.date, row.HCK, row.ADE, row.OK1, row.OK2, row.OK4, row.flex, row.flex2, row.replacements])
+        ...weekRows.map((row) => [row.day, formatDate(row.date), row.HCK, row.ADE, row.OK1, row.OK2, row.OK4, row.flex, row.flex2, row.replacements])
       ];
 
       const medewerkersRows = [
@@ -776,9 +797,9 @@
       document.getElementById("selectedWeek").value = state.selectedWeek;
 
       const current = getCurrentBlockRow();
-      document.getElementById("cardBlock").textContent = `Blok ${current.block}`;
-      document.getElementById("cardWeek").textContent = `Week ${state.selectedWeek}`;
-      document.getElementById("cardPeriod").textContent = `${formatDate(current.startDate)} t/m ${formatDate(current.endDate)}`;
+      document.getElementById("cardBlock").textContent = "Blok " + current.block;
+      document.getElementById("cardWeek").textContent = "Week " + state.selectedWeek;
+      document.getElementById("cardPeriod").textContent = formatDate(current.startDate) + " t/m " + formatDate(current.endDate);
 
       blockSelect.onchange = (e) => {
         state.selectedBlock = e.target.value;
@@ -862,8 +883,8 @@
                   <tr>
                     <td>${row.block}</td>
                     <td><input class="input" data-rotation="${index}" data-field="weekInBlock" value="${row.weekInBlock}" /></td>
-                    <td><input class="input" data-rotation="${index}" data-field="startDate" value="${row.startDate}" /></td>
-                    <td><input class="input" data-rotation="${index}" data-field="endDate" value="${row.endDate}" /></td>
+                    <td><input class="input" data-rotation="${index}" data-field="startDate" value="${formatDate(row.startDate)}" /></td>
+                    <td><input class="input" data-rotation="${index}" data-field="endDate" value="${formatDate(row.endDate)}" /></td>
                     ${services.map((service) => `
                       <td><input class="input" data-rotation="${index}" data-field="${service}" value="${row[service] || ""}" /></td>
                     `).join("")}
@@ -998,7 +1019,10 @@
         input.addEventListener("input", (e) => {
           const index = Number(e.target.dataset.rotation);
           const field = e.target.dataset.field;
-          state.rotation[index][field] = e.target.value;
+          state.rotation[index][field] =
+            field === "startDate" || field === "endDate"
+              ? normalizeDateInput(e.target.value)
+              : e.target.value;
         });
       });
 
@@ -1043,7 +1067,7 @@
       const addBtn = document.getElementById("addEmployeeBtn");
       if (addBtn) {
         addBtn.onclick = () => {
-          const newName = `Nieuw${state.employees.length + 1}`;
+          const newName = "Nieuw" + (state.employees.length + 1);
           state.employees.push({
             name: newName,
             hours: 36,
@@ -1074,6 +1098,30 @@
       if (state.activeTab === "dashboard") content.innerHTML = renderDashboard();
 
       bindTabEvents();
+    }
+
+    function renderTabs() {
+      const tabs = [
+        ["weektemplate", "Weektemplate"],
+        ["roulatie", "Roulatie"],
+        ["medewerkers", "Medewerkers"],
+        ["competenties", "Competenties"],
+        ["dashboard", "Dashboard"],
+      ];
+
+      document.getElementById("tabs").innerHTML = tabs
+        .map(([key, label]) => {
+          const active = state.activeTab === key ? "tab active" : "tab";
+          return `<button class="${active}" data-tab="${key}">${label}</button>`;
+        })
+        .join("");
+
+      document.querySelectorAll("[data-tab]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          state.activeTab = btn.dataset.tab;
+          render();
+        });
+      });
     }
 
     function render() {
