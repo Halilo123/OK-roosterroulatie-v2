@@ -422,10 +422,31 @@
       return pools;
     }
 
+    function buildFlexPool() {
+      return state.employees
+        .map((employee) => ({
+          name: employee.name,
+          totalScore: getEmployeeScore(employee.name, state.competencies),
+          greenCount: services.filter((service) => (state.competencies[employee.name] || {})[service] === "Groen").length,
+          offConflicts: weeklyOffConflictCount(employee),
+          icPenalty: isICEmployee(employee) ? 1 : 0,
+        }))
+        .sort((a, b) => {
+          if (a.icPenalty !== b.icPenalty) return a.icPenalty - b.icPenalty;
+          if (a.offConflicts !== b.offConflicts) return a.offConflicts - b.offConflicts;
+          if (b.greenCount !== a.greenCount) return b.greenCount - a.greenCount;
+          if (b.totalScore !== a.totalScore) return b.totalScore - a.totalScore;
+          return a.name.localeCompare(b.name);
+        })
+        .map((candidate) => candidate.name);
+    }
+
     function buildRotationCycle() {
       const currentCounts = {};
+      const flexCounts = {};
       const rotation = createEmptyRotation();
       const servicePools = buildServicePools();
+      const flexPool = buildFlexPool();
 
       for (let block = 1; block <= 6; block++) {
         const cycleIndex = (block - 1) % cycleLength;
@@ -470,15 +491,41 @@
           }
         });
 
-        const flex = computeFlexCandidates(baseRow, state.employees, state.competencies, currentCounts)
-          .slice(0, 2)
-          .map((candidate) => candidate.name);
+        const rotatedFlex = [];
+        for (let i = 0; i < flexPool.length; i++) {
+          const candidate = flexPool[(block - 1 + i) % flexPool.length];
+          if (!usedNames.has(candidate)) {
+            rotatedFlex.push(candidate);
+          }
+        }
 
-        baseRow.flex1 = flex[0] || "";
-        baseRow.flex2 = flex[1] || "";
+        rotatedFlex.sort((a, b) => {
+          const aCount = flexCounts[a] || 0;
+          const bCount = flexCounts[b] || 0;
+          if (aCount !== bCount) return aCount - bCount;
+          return a.localeCompare(b);
+        });
 
-        if (baseRow.flex1) currentCounts[baseRow.flex1] = (currentCounts[baseRow.flex1] || 0) + 2;
-        if (baseRow.flex2) currentCounts[baseRow.flex2] = (currentCounts[baseRow.flex2] || 0) + 2;
+        baseRow.flex1 = rotatedFlex[0] || "";
+        baseRow.flex2 = rotatedFlex.find((name) => name !== baseRow.flex1) || "";
+
+        if (!baseRow.flex1 || !baseRow.flex2) {
+          const flexFallback = computeFlexCandidates(baseRow, state.employees, state.competencies, currentCounts)
+            .filter((candidate) => !usedNames.has(candidate.name))
+            .map((candidate) => candidate.name);
+
+          if (!baseRow.flex1) baseRow.flex1 = flexFallback[0] || "";
+          if (!baseRow.flex2) baseRow.flex2 = flexFallback.find((name) => name !== baseRow.flex1) || "";
+        }
+
+        if (baseRow.flex1) {
+          flexCounts[baseRow.flex1] = (flexCounts[baseRow.flex1] || 0) + 1;
+          currentCounts[baseRow.flex1] = (currentCounts[baseRow.flex1] || 0) + 2;
+        }
+        if (baseRow.flex2) {
+          flexCounts[baseRow.flex2] = (flexCounts[baseRow.flex2] || 0) + 1;
+          currentCounts[baseRow.flex2] = (currentCounts[baseRow.flex2] || 0) + 2;
+        }
 
         weekRows.forEach((row) => {
           row.HCK = baseRow.HCK;
@@ -796,7 +843,7 @@
       return `
         <div class="panel">
           <h2>Roulatie (2 weken)</h2>
-          <p class="muted small">De basisdiensten rouleren in een cyclus van 3 blokken = 6 weken. Binnen elk blok blijven week 1 en week 2 gelijk.</p>
+          <p class="muted small">De basisdiensten rouleren in een cyclus van 3 blokken = 6 weken. Binnen elk blok blijven week 1 en week 2 gelijk. OK-FLEX 1 en OK-FLEX 2 rouleren ook mee zodat iedereen die beschikbaar is aan de beurt komt.</p>
           <div class="table-wrap">
             <table>
               <thead>
