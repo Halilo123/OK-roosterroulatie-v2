@@ -392,7 +392,7 @@
       }).flat();
     }
 
-    const STORAGE_KEY = "ok-rooster-planner-state-v1";
+    const STORAGE_KEY = "ok-rooster-planner-state-v2";
 
     const state = {
       activeTab: "weektemplate",
@@ -706,6 +706,13 @@
         state.employees = Array.isArray(parsed.employees) ? parsed.employees : JSON.parse(JSON.stringify(defaultEmployees));
         state.competencies = parsed.competencies && typeof parsed.competencies === "object" ? parsed.competencies : JSON.parse(JSON.stringify(defaultCompetencies));
         state.rotation = Array.isArray(parsed.rotation) && parsed.rotation.length > 0 ? parsed.rotation : [];
+
+        const hasEndOfYearBlocks = state.rotation.some((row) => row.startDate && normalizeDateInput(row.startDate) >= "2026-12-01");
+        if (!hasEndOfYearBlocks) {
+          state.rotation = [];
+          return false;
+        }
+
         return true;
       } catch (error) {
         console.error("Kon opgeslagen gegevens niet laden", error);
